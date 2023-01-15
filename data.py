@@ -2,7 +2,8 @@
 from typechecking import *
 from neural import NeuralData
 from motor import KinData
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import numpy as np
 
 # ----------------------------------
 
@@ -16,6 +17,14 @@ class DatasetMeta:
     sites: Set[str]
     file: str
 
+
+@dataclass
+class Event:
+    """ Neural/kinematic event time and index """
+    name: str
+    tm: float
+    ix: int
+    is_neural: bool
 
 # ----------------------------------
 
@@ -32,56 +41,53 @@ class Trial:
     kin: KinData = None
     neural: NeuralData = None
 
-    _events: dict[str, float] = None
-    _properties: dict[str, Any] = None
-
-    def __post_init__(self):
-        if self._events is not None:
-            self.set_events(self._events)
-        if self._properties is not None:
-            self.set_properties(self._properties)
-        pass
+    _properties: dict[str, Any] = field(default_factory=dict)
+    _events: dict[str, Event] = field(default_factory=dict)
 
     @property
     def duration(self):
+        if not ("end" in self and "st" in self):
+            raise AssertionError("Start and end trial events are not defined")
         return self.end - self.st
 
-    def get_events(self):
+    @property
+    def num_samples(self):
+        assert self.kin.num_samples == self.neural.num_samples
+        return self.kin.num_samples
+
+    @property
+    def properties(self) -> dict[str, Any]:
+        return self._properties
+
+    @property
+    def events(self) -> dict[str, Event]:
         return self._events
 
-    def set_events(self, events_dict: dict[str, float]) -> None:
-        """ Validate format and order by event times """
-        if "st" not in events_dict or "end" not in events_dict:
-            raise ValueError("Events must include 'st' (trial start time) and 'end' (trial end time)")
-        assert is_type(events_dict, dict[str, float])
-        keys = list(events_dict.keys())
-        values = list(events_dict.values())
-        if not set(keys).isdisjoint(set(self._properties.keys())):
-            raise ValueError("Event names clash with existing properties")
-        self._events = dict({keys[ix]: values[ix] for ix in np.argsort(values)})
+    def add_events(self, event_tms: dict[str, float], is_neural=False):
+        if (is_neural and self.neural is None) or (not is_neural and self.kin is None):
+            raise AssertionError("Cannot set event before its prospective data is initialized")
+        for name, tm in event_tms.items():
+            if name in self._events or name in self._properties:
+                raise AssertionError("Event or property already exists: " + name)
+            ix = self.neural.index(tm) if is_neural else self.kin.index(tm)
+            self._events[name] = Event(name=name, tm=tm, ix=ix, is_neural=is_neural)
 
-    def add_events(self, events_dict: dict[str, float]) -> None:
-        for k, v in self._events.items():
-            if k in events_dict:
-                raise ValueError(f"Event {k} already exists")
-            events_dict[k] = v
-        self.set_events(events_dict)
-
-    def set_properties(self, properties_dict: dict[str, Any]) -> None:
-        if not set(properties_dict.keys()).isdisjoint(set(self._events.keys())):
-            raise ValueError("Property name clash with existing event names")
-        self._properties = properties_dict
+    def add_properties(self, properties: dict[str, Any]):
+        for name in properties:
+            if name in self._events or name in self._properties:
+                raise AssertionError("Event or property already exists: " + name)
+            self._properties[name] = properties[name]
 
     def __getattr__(self, item):
         return self.__getitem__(item)
 
     def __getitem__(self, item):
         if item in self._events:
-            return self._events[item]
+            return self._events[item].ix
         elif item in self._properties:
             return self._properties[item]
         else:
-            raise AttributeError(f"Unknown attribute " + item)
+            raise AttributeError(f"Unknown event or property: " + item)
         pass
 
 
@@ -102,9 +108,12 @@ class Data:
     def _validate(self):
         if not len(self._trials):
             raise ValueError("Cannot initialize data with empty trial list")
-        # properties that are suppose to be the same for all trials:
-        assert all([tr.lag == self._trials[0].lag for tr in self._trials])
-        assert all([tr.bin_sz == self._trials[0].bin_sz for tr in self._trials])
+        # all trials should have the same lag and in size:
+        assert all([tr.lag == self[0].lag for tr in self])
+        assert all([tr.bin_sz == self[0].bin_sz for tr in self])
+        # all trials should have the same events and properties:
+        assert all([tr.properties.keys() == self[0].properties.keys() for tr in self])
+        assert all([tr.events.keys() == self[0].events.keys() for tr in self])
 
     def set_trials(self, trials: list[Trial]):
         self._trials = trials

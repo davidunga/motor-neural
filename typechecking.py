@@ -1,5 +1,5 @@
 from typing import Sequence, Literal, Annotated, Self, Tuple, Any, Set
-import numpy as np
+import numpy as _np
 from nptyping import NDArray, Shape, Float, Int, UInt
 import types
 
@@ -26,8 +26,8 @@ Vec = {
 
 def is_sorted(x: NpVec[Any], order: Literal['a', 'd'] = 'a'):
     if order == 'a':
-        return np.all(x[:-1] <= x[1:])
-    return np.all(x[:-1] >= x[1:])
+        return _np.all(x[:-1] <= x[1:])
+    return _np.all(x[:-1] >= x[1:])
 
 
 def is_type(x: Any, type_):

@@ -48,8 +48,8 @@ Structure:
 # -----------------------
 
 import numpy as np
-from data import Trial, Data, DatasetMeta
-from neural import NeuralData, NeuronSpikeTimes
+from data import Trial, Data, DatasetMeta, Event
+from neural import NeuralData, PopulationSpikeTimes
 from motor import calc_kinematics
 from scipy.io import loadmat
 import os
@@ -88,17 +88,17 @@ def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float) -> HatsoD
     # ----------
     # helper functions:
 
-    def _get_TP_events(raw):
+    def _get_TP_events_and_properies(raw):
         """ Get Target Pursuit trial events and properties """
         st = np.real(raw['cpl_st_trial_rew'])[:, 0]
         end = np.real(raw['cpl_st_trial_rew'])[:, 1]
         mv_end = raw['endmv'].flatten()
         mv_end = mv_end[np.searchsorted(mv_end, st[0]):]
         assert len(mv_end) == len(st)
-        events = [{"st": st[ix], "end": end[ix], "mv_end": mv_end[ix]} for ix in range(len(st))]
-        return events, [{} for _ in range(len(st))]
+        event_tms = [{"st": st[ix], "end": end[ix], "mv_end": mv_end[ix]} for ix in range(len(st))]
+        return event_tms, [{} for _ in range(len(st))]
 
-    def _get_CO_events(raw):
+    def _get_CO_events_and_properies(raw):
         """ Get Center Out trial events and properties """
         st = np.concatenate([raw[f'cpl_{ang}deg'].flatten() for ang in range(0, 360, 45)])
         si = np.argsort(st)
@@ -109,26 +109,26 @@ def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float) -> HatsoD
         mv_st = np.concatenate([raw[f'cpl_{ang}deg_stmv'].flatten() for ang in range(0, 360, 45)])[si]
         mv_end = np.concatenate([raw[f'cpl_{ang}deg_endmv'].flatten() for ang in range(0, 360, 45)])[si]
         end = raw['reward'].flatten()
-        events = [{"st": st[ix], "end": end[ix], "instr": instr[ix], "go": go[ix],
-                   "mv_st": mv_st[ix], "mv_end": mv_end[ix]} for ix in range(len(st))]
+        event_tms = [{"st": st[ix], "end": end[ix], "instr": instr[ix], "go": go[ix],
+                      "mv_st": mv_st[ix], "mv_end": mv_end[ix]} for ix in range(len(st))]
         properties = [{"ang": int(angs[ix])} for ix in range(len(angs))]
-        return events, properties
+        return event_tms, properties
 
-    def _make_neural_data(raw):
-        """ Make neural data """
+    def _get_neural_data(raw):
+        """ Get neuron spikes times and info """
         chans = list(raw['MIchans'].squeeze())
         if 'PMdchans' in raw:
             chans += list(raw['PMdchans'].squeeze())
-        neuron_spktimes = NeuronSpikeTimes()
-        neuron_sites = {}
+        neuron_spktimes = {}
+        neuron_info = {}
         for k in sorted(list(k for k in raw.keys() if k.startswith('Chan'))):
             assert re.match("Chan[0-9]{3}[a-z]{1}", k) is not None
             neuron_name = k[4:]
             neuron_chan = int(k[4:-1])
             neuron_spktimes[neuron_name] = np.real(raw[k].flatten())
-            neuron_sites[neuron_name] = 'm1' if neuron_chan in raw['MIchans'] else 'pmd'
+            neuron_info[neuron_name] = {'site': 'm1' if neuron_chan in raw['MIchans'] else 'pmd'}
         assert len(neuron_spktimes) > 0
-        return NeuralData(neuron_spktimes, neuron_sites)
+        return PopulationSpikeTimes(neuron_spktimes), neuron_info
 
     # ----------
     # core:
@@ -141,44 +141,51 @@ def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float) -> HatsoD
     kin = calc_kinematics(X, t, smooth_sig=bin_sz)
 
     # full neural:
-    neural = _make_neural_data(raw_)
+    population_spktimes, neuron_info = _get_neural_data(raw_)
 
-    # make trials:
-    events, properties = _get_CO_events(raw_) if 'cpl_0deg' in raw_ else _get_TP_events(raw_)
+    # get events and properties:
+    events_tms, properties = (_get_CO_events_and_properies(raw_) if 'cpl_0deg' in raw_ else
+                              _get_TP_events_and_properies(raw_))
+
     trials = []
-    for ix in range(len(events)):
+    for ix, (tr_event_tms, tr_properties) in enumerate(zip(events_tms, properties)):
 
         # trial skeleton:
-        tr = Trial(dataset=dataset, ix=ix, lag=lag, bin_sz=bin_sz, _events=events[ix], _properties=properties[ix])
+        tr = Trial(dataset=dataset, ix=ix, lag=lag, bin_sz=bin_sz)
 
         # add neural data:
-        tr.neural = neural.TimeSlice([tr.st, tr.end - lag])
-        tr.neural.make_spkcounts_(bin_sz)
+        st = np.ceil(tr_event_tms["st"] / bin_sz) * bin_sz
+        end = np.floor((tr_event_tms["end"] - lag) / bin_sz) * bin_sz
+        tr.neural = NeuralData(spktimes=population_spktimes.TimeSlice([st, end]),
+                               fs=1 / bin_sz, tlims=[st, end], neuron_info=neuron_info)
 
-        # add kinematics:
-        tr.kin = kin.TimeSlice([tr.st + lag - .1, tr.end])
-        tr.kin.resample_(tr.neural.t + lag)
+        # add kinematic data:
+        st = np.ceil((tr_event_tms["st"] + lag) / bin_sz) * bin_sz
+        end = np.floor(tr_event_tms["end"] / bin_sz) * bin_sz
+        tr.kin = kin.Resample(1 / bin_sz, [st, end])
 
-        # additional events:
-        tr.add_events({
-            "max_spd": tr.kin.t[np.argmax(tr.kin["spd2"])],
-        })
+        # add events and properties:
+        tr_event_tms["max_spd"] = tr.kin.t[np.argmax(tr.kin["spd2"])]
+        tr.add_events(tr_event_tms, is_neural=False)
+        tr.add_properties(tr_properties)
 
-        trials.append(tr)
         assert tr.kin.num_samples == tr.neural.num_samples
         assert np.max(np.abs((tr.kin.t - tr.neural.t) - lag)) < 1e-6
 
+        trials.append(tr)
+
     # normalize spike counts per neuron:
-    all_spkcounts = np.concatenate([tr.neural.get_spkcounts()[0] for tr in trials], axis=1)
+    all_spkcounts = np.concatenate([tr.neural.spkcounts for tr in trials], axis=1)
+    assert all_spkcounts.shape[0] == trials[0].neural.num_neurons
     mu = np.mean(all_spkcounts, axis=1)
     sd = np.maximum(np.std(all_spkcounts, axis=1), np.finfo(float).eps)
     for tr in trials:
-        tr.neural.set_spkcounts((tr.neural.get_spkcounts()[0] - mu[:, None]) / sd[:, None])
+        tr.neural.spkcounts = (tr.neural.spkcounts - mu[:, None]) / sd[:, None]
 
     # ---
     # sanity-
     # properties that are suppose to be the same for all trials:
-    assert all([tr.neural.sites == trials[0].neural.sites for tr in trials])
+    assert all([tr.neural.neuron_info() == trials[0].neural.neuron_info() for tr in trials])
     assert all([tr.dataset == trials[0].dataset for tr in trials])
     assert all([tr.lag == trials[0].lag for tr in trials])
     assert all([tr.bin_sz == trials[0].bin_sz for tr in trials])

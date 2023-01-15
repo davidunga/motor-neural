@@ -3,57 +3,18 @@ Motor and kinematic data processing + containers
 """
 
 import numpy as np
-from dataclasses import dataclass
 from typechecking import *
 from scipy.interpolate import interp1d
 from scipy.ndimage import gaussian_filter1d
+from uniformly_sampled import UniformlySampled
+
+# ----------------------------------
 
 
-@dataclass
-class KinData:
-
-    _t: NpVec[float]
-    _d: dict[str, NpVec[float]]
-    _dt = None
-
-    def __post_init__(self):
-        self._dt = np.diff(self.t)
-        assert np.all(self._dt > 0)
-        assert np.min(self._dt) > .999 * np.max(self._dt), "Time samples not sufficiently uniform"
-        assert all([len(v) == len(self.t) for v in self._d.values()])
-
-    @property
-    def t(self) -> NpVec[float]:
-        return self._t
-
-    def index(self, tms: Vec[float]) -> NpVec[int]:
-        edges = np.linspace(self.t[0] - .5 * self._dt, self.t[-1] + .5 * self._dt, self.num_samples + 1)
-        return np.searchsorted(edges, tms)
-
-    @property
-    def num_samples(self):
-        return len(self.t)
-
-    def TimeSlice(self, tlims: Pair[float]) -> Self:
-        ifm, ito = np.searchsorted(self.t, tlims)
-        ifm -= 1
-        return KinData(self.t[ifm: ito], {k: v[ifm: ito] for k, v in self._d.items()})
-
-    def resample_(self, t: NpVec[float]) -> None:
-        assert is_sorted(t), "time parameter must be monotonically increasing"
-        assert t[0] >= self.t[0] and t[-1] <= self.t[-1],\
-            f"New time range ({t[0]} - {t[-1]}) exceeds current range ({self.t[0]} - {self.t[-1]})"
-        assert len(t) <= len(self.t), "up-sampling is not supported"
-        for k, v in self._d.items():
-            self._d[k] = interp1d(self.t, v, kind="cubic", axis=0)(t)
-        self._t = t
-
-    def __getitem__(self, item):
-        return self._d[item]
-
-    def __getattr__(self, item):
-        return self._d[item]
-
+class KinData(UniformlySampled):
+    """ uniformly sampled kinematic data """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
 
 # ----------------------------------
 
@@ -102,7 +63,7 @@ def calc_kinematics(X: NpNx2[float], t: NpVec[float], smooth_sig: float = .1) ->
     _dbg = False
 
     fs = (len(t) - 1) / (t[-1] - t[0])
-    t_ = t[0] + np.arange(len(t)) / fs
+    t_ = np.ceil(t[0] * fs) / fs + np.arange(len(t) - 1) / fs
     X = interp1d(t, X, kind="cubic", axis=0)(t_)
     t = t_
     del t_
@@ -112,14 +73,12 @@ def calc_kinematics(X: NpNx2[float], t: NpVec[float], smooth_sig: float = .1) ->
 
     X = gaussian_filter1d(X, sigma=smooth_sig * fs, axis=0)
     vel, acc, jrk = derivative(X, t, n=3)
-    return KinData(t, {
-                'X': X,
-                'velx': vel[:, 0],
-                'vely': vel[:, 1],
-                'accx': acc[:, 0],
-                'accy': acc[:, 1],
-                'spd2': np.linalg.norm(vel, axis=1),
-                'acc2': np.linalg.norm(acc, axis=1)
-    })
+    kin = {'X': X,
+           'velx': vel[:, 0], 'vely': vel[:, 1],
+           'accx': acc[:, 0], 'accy': acc[:, 1],
+           'spd2': np.linalg.norm(vel, axis=1),
+           'acc2': np.linalg.norm(acc, axis=1)}
+
+    return KinData(fs, t[0], kin)
 
 
