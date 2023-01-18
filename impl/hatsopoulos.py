@@ -50,7 +50,7 @@ Structure:
 import numpy as np
 from data import Trial, Data, DatasetMeta, Event
 from neural import NeuralData, PopulationSpikeTimes
-from motor import calc_kinematics
+from motor import DefaultKinFnc, KinFnc
 from scipy.io import loadmat
 import os
 import re
@@ -74,14 +74,16 @@ class HatsoData(Data):
         super().__init__(trials, meta)
 
     @classmethod
-    def Make(cls, data_dir: str, dataset: str, lag: float, bin_sz: float):
-        return _load_data(data_dir, dataset, lag, bin_sz)
+    def make(cls, data_dir: str, dataset: str, lag: float, bin_sz: float, kin_fnc: KinFnc = None):
+        return _load_data(data_dir, dataset, lag, bin_sz, kin_fnc)
 
 # -----------------------
 
 
-def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float) -> HatsoData:
+def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float, kin_fnc: KinFnc = None) -> HatsoData:
 
+    if kin_fnc is None:
+        kin_fnc = DefaultKinFnc()
     assert np.abs(lag) <= 1, f"Extreme lag value: {lag}. Make sure its in seconds."
     assert 0 < bin_sz <= 1, f"Extreme bin size value: {bin_sz}. Make sure its in seconds."
 
@@ -138,7 +140,7 @@ def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float) -> HatsoD
     # full kinematics:
     X = np.stack([raw_['x'][:, 1], raw_['y'][:, 1]], axis=1)
     t = .5 * (raw_['x'][:, 0] + raw_['y'][:, 0])
-    kin = calc_kinematics(X, t, smooth_sig=bin_sz)
+    kin = kin_fnc(X, t)
 
     # full neural:
     population_spktimes, neuron_info = _get_neural_data(raw_)

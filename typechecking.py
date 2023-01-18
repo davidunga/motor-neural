@@ -1,4 +1,4 @@
-from typing import Sequence, Literal, Annotated, Self, Tuple, Any, Set
+from typing import Sequence, Literal, Annotated, Self, Tuple, Any, Set, Callable
 import numpy as _np
 from nptyping import NDArray, Shape, Float, Int, UInt
 import types

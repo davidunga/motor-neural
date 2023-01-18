@@ -31,6 +31,37 @@ def make_time_bins(fs: float, tlims: Pair[float], tol: float = 1e-6) -> NpVec[fl
 
 
 @dataclass
+class UniformTime:
+
+    fs: float
+    t0: float
+    n: int
+
+    _dt: float = None
+
+    @classmethod
+    def from_time(cls, t: Vec[float]):
+        fs = (len(t) - 1) / (t[-1] - t[0])
+        t0 = np.ceil(t[0] * fs) / fs
+        n = int((t[-1] - t0) * fs)
+        return cls(fs=fs, t0=t0, n=n)
+
+    @property
+    def t(self) -> NpVec[float]:
+        return self.t0 + np.arange(self.n) * self.dt
+
+    @property
+    def dt(self) -> float:
+        if self._dt is None:
+            self._dt = 1 / self.fs
+        return self._dt
+
+    @property
+    def tlims(self) -> Tuple[float, float]:
+        return self.t0, self.t0 + (self.n - 1) * self.dt
+
+
+@dataclass
 class UniformlySampled:
     """
     Container for uniformly sampled data
