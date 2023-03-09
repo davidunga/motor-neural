@@ -48,9 +48,9 @@ Structure:
 # -----------------------
 
 import numpy as np
-from motorneural.data import Trial, Data, DatasetMeta
-from motorneural.neural import NeuralData, PopulationSpikeTimes
-from motorneural.motor import KinData, calc_kinematics
+from motorneural.motorneural.data import Trial, Data, DatasetMeta
+from motorneural.motorneural.neural import NeuralData, PopulationSpikeTimes
+from motorneural.motorneural.motor import KinData, calc_kinematics
 from scipy.io import loadmat
 import os
 import re
