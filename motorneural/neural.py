@@ -59,7 +59,7 @@ class PopulationSpikeTimes:
     def num_neurons(self):
         return len(self._names)
 
-    def TimeSlice(self, tlims: Pair[float]) -> Self:
+    def TimeSlice(self, tlims: Pair[float]):
         """ Get a time-sliced copy of object """
         sliced = PopulationSpikeTimes()
         sliced._tms, sliced._ixs = self.population_spktimes(tlims)
