@@ -48,13 +48,13 @@ Structure:
 # -----------------------
 
 import numpy as np
-from data import Trial, Data, DatasetMeta
-from neural import NeuralData, PopulationSpikeTimes
-from motor import KinData, calc_kinematics
+from motorneural.data import Trial, Data, DatasetMeta
+from motorneural.neural import NeuralData, PopulationSpikeTimes
+from motorneural.motor import KinData, calc_kinematics
 from scipy.io import loadmat
 import os
 import re
-from typechecking import Callable
+from motorneural.typechecking import Callable
 
 # -----------------------
 

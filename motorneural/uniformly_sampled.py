@@ -1,6 +1,5 @@
 from dataclasses import dataclass
-from typechecking import *
-from scipy.interpolate import interp1d
+from motorneural.typechecking import *
 import numpy as np
 
 
