@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from motorneural.data import Data
-from motorneural.typechecking import Pair, NpMat, NpVec, Tuple
+from motorneural.motorneural.data import Data
+from motorneural.motorneural.typechecking import Pair, NpMat, NpVec, Tuple
 
 
 def calc_event_triggered_response(data: Data, event="max_spd", tradius=Pair[float],

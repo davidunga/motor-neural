@@ -3,7 +3,7 @@ Motor and kinematic data processing + containers
 """
 
 import numpy as np
-from motorneural.typechecking import *
+from motorneural.motorneural.typechecking import *
 from scipy.interpolate import interp1d
 from uniformly_sampled import UniformlySampled
 from geometrik.geometrik.spcurve_factory import make_ndspline
