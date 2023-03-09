@@ -54,7 +54,7 @@ from motorneural.motorneural.motor import KinData, calc_kinematics
 from scipy.io import loadmat
 import os
 import re
-from motorneural.typechecking import Callable
+from motorneural.motorneural.typechecking import Callable
 
 # -----------------------
 
