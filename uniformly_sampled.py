@@ -3,6 +3,7 @@ from typechecking import *
 from scipy.interpolate import interp1d
 import numpy as np
 
+
 # ----------------------------------
 
 
@@ -29,36 +30,36 @@ def make_time_bins(fs: float, tlims: Pair[float], tol: float = 1e-6) -> NpVec[fl
 
 # ----------------------------------
 
-
-@dataclass
-class UniformTime:
-
-    fs: float
-    t0: float
-    n: int
-
-    _dt: float = None
-
-    @classmethod
-    def from_time(cls, t: Vec[float]):
-        fs = (len(t) - 1) / (t[-1] - t[0])
-        t0 = np.ceil(t[0] * fs) / fs
-        n = int((t[-1] - t0) * fs)
-        return cls(fs=fs, t0=t0, n=n)
-
-    @property
-    def t(self) -> NpVec[float]:
-        return self.t0 + np.arange(self.n) * self.dt
-
-    @property
-    def dt(self) -> float:
-        if self._dt is None:
-            self._dt = 1 / self.fs
-        return self._dt
-
-    @property
-    def tlims(self) -> Tuple[float, float]:
-        return self.t0, self.t0 + (self.n - 1) * self.dt
+#
+# @dataclass
+# class UniformTime:
+#
+#     fs: float
+#     t0: float
+#     n: int
+#
+#     _dt: float = None
+#
+#     @classmethod
+#     def from_time(cls, t: Vec[float]):
+#         fs = (len(t) - 1) / (t[-1] - t[0])
+#         t0 = np.ceil(t[0] * fs) / fs
+#         n = int((t[-1] - t0) * fs)
+#         return cls(fs=fs, t0=t0, n=n)
+#
+#     @property
+#     def t(self) -> NpVec[float]:
+#         return self.t0 + np.arange(self.n) * self.dt
+#
+#     @property
+#     def dt(self) -> float:
+#         if self._dt is None:
+#             self._dt = 1 / self.fs
+#         return self._dt
+#
+#     @property
+#     def tlims(self) -> Tuple[float, float]:
+#         return self.t0, self.t0 + (self.n - 1) * self.dt
 
 
 @dataclass
@@ -84,7 +85,7 @@ class UniformlySampled:
         if len(args) == 0:
             assert set(kwargs.keys()) == {"keys", "vals"}
             keys = kwargs['keys']
-            vals = kwargs['vals']
+            vals = np.array(kwargs['vals'])
         elif len(args) == 1:
             assert len(kwargs) == 0
             vals = np.concatenate([v[:, None] if v.ndim == 1 else v for v in args[0].values()], axis=1).T
@@ -93,30 +94,27 @@ class UniformlySampled:
             raise ValueError
 
         assert len(keys) == vals.shape[0]
-        t0 = snap_to_uniform_sampling(fs, t0)
         self._fs = fs
-        self._t = t0 + np.arange(vals.shape[1]) / self._fs
+        self._t0 = t0
+        self._t = self._t0 + np.arange(vals.shape[1]) / self._fs
         self._keys = np.array(keys)
         self._vals = vals
 
-    def Resample(self, fs: float, tlims: Pair[float]) -> Self:
-        """
-        Creates a new object by cropping and resampling
-        Args:
-            fs: new sampling rate
-            tlims: new time limits
-        """
-        if self.fs < fs:
-            raise ValueError("Only downsampling is currently supported")
-        ifm, ito = self.index(tlims)
-        t_curr = self.t[ifm: ito]
-        t = np.arange(np.ceil(t_curr[0] * fs), np.floor(t_curr[-1] * fs) + 1) / fs
-        vals = interp1d(t_curr, self._vals[:, ifm: ito], kind="cubic", axis=1)(t)
-        return UniformlySampled(fs=fs, t0=t[0], keys=self._keys, vals=vals)
+    @classmethod
+    def from_json(cls, obj):
+        return UniformlySampled(fs=obj["fs"], t0=obj["t0"], keys=obj["keys"], vals=obj["vals"])
 
     def index(self, tms: NpVec[float]) -> NpVec[int]:
         """ Index of time values """
         return np.floor((tms - self.t[0]) * self.fs).astype(int)
+
+    def to_json(self):
+        return {
+            "fs": self._fs,
+            "t0": self._t0,
+            "keys": self._keys.tolist(),
+            "vals": [v.tolist() for v in self._vals]
+        }
 
     def _as_array(self) -> NpMat[float]:
         """ Returns values array arr, such that arr[i,:] is the i-th variable """
@@ -139,9 +137,14 @@ class UniformlySampled:
     def num_samples(self) -> int:
         return len(self.t)
 
+    def get_slice(self, slc: slice):
+        return UniformlySampled(self._fs, self._t0, keys=self._keys, vals=self._vals[:, slc])
+
     def __getitem__(self, item: str) -> NDArray:
+        assert item in self._keys
         return self._vals[self._keys == item, :].T.squeeze()
 
     def __getattr__(self, item):
+        assert item in self._keys
         return self._vals[self._keys == item, :].T.squeeze()
 

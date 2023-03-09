@@ -5,9 +5,9 @@ Motor and kinematic data processing + containers
 import numpy as np
 from typechecking import *
 from scipy.interpolate import interp1d
-from scipy.ndimage import gaussian_filter1d
-from uniformly_sampled import UniformlySampled, UniformTime
-from abc import ABC, abstractmethod
+from uniformly_sampled import UniformlySampled
+from geometrik.geometrik.spcurve_factory import make_ndspline
+from geometrik.geometrik.invariants import geometric_invariants
 
 # ----------------------------------
 
@@ -21,78 +21,79 @@ class KinData(UniformlySampled):
 # ----------------------------------
 
 
-def cart2polar(v: NpNx2[float], c: Pair[float] = None) -> Tuple[NpVec[float], NpVec[float]]:
-    if c is None:
-        c = np.mean(v, axis=0)
-    v -= c
-    rho = np.linalg.norm(v, axis=1)
-    uvec = v / rho[: None]
-    return uvec, rho
-
-
-def derivative(X, t, n=1):
+def numdrv(X: np.ndarray, t: np.ndarray, n=1, ret_all=False):
     """
-    n-th order derivatives of X wrt t
+    Simple numeric derivative(s) of X wrt t.
     Args:
-        X: 2d array, NxD, N = points, D = dim
-        t: 1d array, parameter to differentiate by.
-        n: order of derivative
+        X: 2d np array, points x dims
+        t: 1d np array, same length as X.
+        n: order of derivative.
+        ret_all: return all derivatives up to n; 1,2,..n.
     Returns:
-        [dX/dt, d^2X/dt, .., d^nX/dt]
+        if ret_all is False: n-th order derivative as np array, same size as X.
+        if ret_all is True: a list of np arrays, same size as X: [d/dt X, (d/dt)^2 X, .., (d/dt)^n X],
     """
-    """
-    n-th order derivatives of X wrt t
-    :param X: 2d array, NxD, N = points, D = dim
-    :param t: 1d array, parameter to differentiate by.
-    :param n: order of derivative
-    :return: drvs: list of length n, drvs[i] contains the (i+1)-th order derivative of X
-    """
-    X = np.expand_dims(X, axis=1) if X.ndim == 1 else X
-    drvs = []
-    for k in range(n):
+
+    shape = X.shape
+    if X.ndim == 1:
+        X = X[:, None]
+
+    all_drvs = []
+    for _ in range(n):
         X = np.copy(X)
         for j in range(X.shape[1]):
             X[:, j] = np.gradient(X[:, j], t, edge_order=1)
-        drvs.append(X.squeeze())
-    return drvs
+        if ret_all:
+            all_drvs.append(X)
+
+    if ret_all:
+        return [X.reshape(shape) for X in all_drvs]
+    return X.reshape(shape)
 
 
-def preprocess_traj(X: NpNx2[float], t: NpVec[float], smooth_sig: float = .1) -> Tuple[NpNx2[float], UniformTime]:
-    assert X.ndim == 2
-    assert X.shape[1] == 2
-    ut = UniformTime.from_time(t)
-    X = interp1d(t, X, kind="cubic", axis=0)(ut.t)
-    if smooth_sig > 0:
-        X = gaussian_filter1d(X, sigma=smooth_sig * ut.fs, axis=0)
-    return X, ut
+def calc_kinematics(X: NpNx2[float], t: NpVec[float], dst_t: NpVec[float], dx: float = .5):
 
-# ----------------------------------
+    def _softpositive(x):
+        d = -x
+        d[x > 0] = 0
+        d = np.interp(np.arange(len(d)), np.nonzero(d)[0], d[d != 0])
+        return x + d
 
+    spl = make_ndspline(X=X, t=t, dx=dx, default_t=None, stol=.1)
+    geom_invars = geometric_invariants(spl)
+    vel = spl(der=1)
+    acc = spl(der=2)
 
-class KinFnc(ABC):
+    kin = {'X': spl(),
+           'velx': vel[:, 0],
+           'vely': vel[:, 1],
+           'accx': acc[:, 0],
+           'accy': acc[:, 1],
+           'spd2': np.linalg.norm(vel, axis=1),
+           'acc2': np.linalg.norm(acc, axis=1),
+           'spd1': numdrv(geom_invars['s1'], spl.t),
+           'spd0': numdrv(geom_invars['s0'], spl.t),
+           'crv2': geom_invars['k2']
+           }
 
-    def __init__(self):
-        pass
+    fs = (len(dst_t) - 1) / (dst_t[-1] - dst_t[0])
+    t0 = dst_t[0]
+    deviation_from_uniform = np.max(np.abs(dst_t - (t0 + np.arange(len(dst_t)) / fs)))
+    max_deviation = .01  # in dt units
+    assert deviation_from_uniform * fs < max_deviation
 
-    @abstractmethod
-    def __call__(self, X: NpNx2[float], t: NpVec[float]) -> KinData:
-        pass
+    s = kin['spd2'].copy()
+    assert np.all(kin['spd2'] >= 0)
 
+    positives = ['spd0', 'spd1', 'spd2', 'acc2']
 
-class DefaultKinFnc(KinFnc):
+    for k, v in kin.items():
+        vi = interp1d(spl.t, v, axis=0, kind="cubic")(dst_t)
+        if k in positives:
+            assert np.mean(vi < 0) < .2
+            vi[vi < 0] = 0
+        kin[k] = vi
 
-    def __init__(self, smooth_sig: float = .1):
-        super().__init__()
-        self.smooth_sig = smooth_sig
-
-    def __call__(self, X: NpNx2[float], t: NpVec[float]) -> KinData:
-        X, ut = preprocess_traj(X, t, self.smooth_sig)
-        vel, acc, jrk = derivative(X, ut.t, n=3)
-        kin = {'X': X,
-               'velx': vel[:, 0], 'vely': vel[:, 1],
-               'accx': acc[:, 0], 'accy': acc[:, 1],
-               'spd2': np.linalg.norm(vel, axis=1),
-               'acc2': np.linalg.norm(acc, axis=1)}
-        return KinData(ut.fs, ut.t0, kin)
+    return KinData(fs, t0, kin)
 
 

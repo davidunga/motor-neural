@@ -19,6 +19,16 @@ class DatasetMeta:
 
 
 @dataclass
+class DataSummary:
+    name: str
+    bin_sz: float
+    lag: float
+
+    def __str__(self):
+        return f"{self.name} bin{int(.5 + 1000 * self.bin_sz):d} lag{int(.5 + 1000 * self.lag):d}"
+
+
+@dataclass
 class Event:
     """ Neural/kinematic event time and index """
     name: str
@@ -49,6 +59,10 @@ class Trial:
         if not ("end" in self and "st" in self):
             raise AssertionError("Start and end trial events are not defined")
         return self.end - self.st
+
+    @property
+    def data_summary(self):
+        return DataSummary(self.dataset, bin_sz=self.bin_sz, lag=self.lag)
 
     @property
     def num_samples(self):
@@ -111,6 +125,7 @@ class Data:
         # all trials should have the same lag and in size:
         assert all([tr.lag == self[0].lag for tr in self])
         assert all([tr.bin_sz == self[0].bin_sz for tr in self])
+        assert all([tr.data_summary == self[0].data_summary for tr in self])
         # all trials should have the same events and properties:
         assert all([tr.properties.keys() == self[0].properties.keys() for tr in self])
         assert all([tr.events.keys() == self[0].events.keys() for tr in self])
@@ -122,6 +137,10 @@ class Data:
     @property
     def meta(self) -> DatasetMeta:
         return self._meta
+
+    @property
+    def summary(self) -> DataSummary:
+        return self._trials[0].data_summary
 
     @property
     def lag(self) -> float:

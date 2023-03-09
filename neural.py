@@ -3,7 +3,7 @@ Handles processing and storing neural information
 """
 
 from typechecking import *
-from uniformly_sampled import UniformlySampled, make_time_bins, snap_to_uniform_sampling
+from uniformly_sampled import UniformlySampled, make_time_bins
 import numpy as np
 
 
@@ -109,7 +109,6 @@ class NeuralData(UniformlySampled):
         if tlims is None:
             tms = spktimes.population_spktimes()[0]
             tlims = [tms[0] - 1 / fs, tms[-1] + 1 / fs]
-        tlims = snap_to_uniform_sampling(fs, tlims)
         super().__init__(fs, tlims[0], spktimes.neuron_spkcounts(bin_edges=make_time_bins(fs, tlims)))
         if neuron_info is not None:
             assert set(spktimes.names) == set(neuron_info.keys())

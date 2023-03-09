@@ -48,13 +48,13 @@ Structure:
 # -----------------------
 
 import numpy as np
-from data import Trial, Data, DatasetMeta, Event
+from data import Trial, Data, DatasetMeta
 from neural import NeuralData, PopulationSpikeTimes
-from motor import DefaultKinFnc, KinFnc
+from motor import KinData, calc_kinematics
 from scipy.io import loadmat
 import os
 import re
-
+from typechecking import Callable
 
 # -----------------------
 
@@ -74,16 +74,18 @@ class HatsoData(Data):
         super().__init__(trials, meta)
 
     @classmethod
-    def make(cls, data_dir: str, dataset: str, lag: float, bin_sz: float, kin_fnc: KinFnc = None):
-        return _load_data(data_dir, dataset, lag, bin_sz, kin_fnc)
+    def make(cls, data_dir: str, dataset: str, lag: float, bin_sz: float, kin_fnc: Callable[None, KinData] = None, max_trials: int = None):
+        return _load_data(data_dir, dataset, lag, bin_sz, kin_fnc, max_trials)
 
 # -----------------------
 
 
-def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float, kin_fnc: KinFnc = None) -> HatsoData:
+def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float,
+               kin_fnc: Callable[None, KinData] = None, max_trials: int = None) -> HatsoData:
 
     if kin_fnc is None:
-        kin_fnc = DefaultKinFnc()
+        kin_fnc = calc_kinematics
+
     assert np.abs(lag) <= 1, f"Extreme lag value: {lag}. Make sure its in seconds."
     assert 0 < bin_sz <= 1, f"Extreme bin size value: {bin_sz}. Make sure its in seconds."
 
@@ -140,7 +142,6 @@ def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float, kin_fnc: 
     # full kinematics:
     X = np.stack([raw_['x'][:, 1], raw_['y'][:, 1]], axis=1)
     t = .5 * (raw_['x'][:, 0] + raw_['y'][:, 0])
-    kin = kin_fnc(X, t)
 
     # full neural:
     population_spktimes, neuron_info = _get_neural_data(raw_)
@@ -152,6 +153,9 @@ def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float, kin_fnc: 
     trials = []
     for ix, (tr_event_tms, tr_properties) in enumerate(zip(events_tms, properties)):
 
+        if max_trials is not None and len(trials) == max_trials:
+            break
+
         # trial skeleton:
         tr = Trial(dataset=dataset, ix=ix, lag=lag, bin_sz=bin_sz)
 
@@ -162,16 +166,16 @@ def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float, kin_fnc: 
                                fs=1 / bin_sz, tlims=[st, end], neuron_info=neuron_info)
 
         # add kinematic data:
-        st = np.ceil((tr_event_tms["st"] + lag) / bin_sz) * bin_sz
-        end = np.floor(tr_event_tms["end"] / bin_sz) * bin_sz
-        tr.kin = kin.Resample(1 / bin_sz, [st, end])
+        ifm, ito = np.searchsorted(t, [st + lag, end + lag])
+        ifm, ito = max(0, ifm - 1), min(len(t), ito + 1)
+        tr.kin = calc_kinematics(X[ifm: ito], t[ifm: ito], dst_t=tr.neural.t + lag, dx=.5)
 
         # add events and properties:
         tr_event_tms["max_spd"] = tr.kin.t[np.argmax(tr.kin["spd2"])]
         tr.add_events(tr_event_tms, is_neural=False)
         tr.add_properties(tr_properties)
 
-        assert tr.kin.num_samples == tr.neural.num_samples
+        assert tr.kin.num_samples == tr.neural.num_samples, (tr.kin.num_samples, tr.neural.num_samples)
         assert np.max(np.abs((tr.kin.t - tr.neural.t) - lag)) < 1e-6
 
         trials.append(tr)
@@ -197,6 +201,11 @@ def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float, kin_fnc: 
     assert all([tr.neural.num_samples == tr.kin.num_samples for tr in trials])
     # ---
 
-    meta = DatasetMeta(**{**{"name": dataset, "sites": trials[0].neural.sites}, **_DATASETS[dataset]})
+    meta = DatasetMeta(**{**{"name": dataset, "sites": set(trials[0].neural.neuron_info("site"))}, **_DATASETS[dataset]})
 
     return HatsoData(trials, meta)
+
+
+if __name__ == "__main__":
+    data = HatsoData.make("~/data/hatsopoulos", "TP_RS", lag=.1, bin_sz=.01)
+
