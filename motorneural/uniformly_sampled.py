@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from motorneural.motorneural.typechecking import *
+from motorneural.typechecking import *
 import numpy as np
 
 

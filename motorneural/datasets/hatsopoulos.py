@@ -48,13 +48,13 @@ Structure:
 # -----------------------
 
 import numpy as np
-from motorneural.motorneural.data import Trial, Data, DatasetMeta
-from motorneural.motorneural.neural import NeuralData, PopulationSpikeTimes
-from motorneural.motorneural.motor import KinData, calc_kinematics
+from motorneural.data import Trial, Data, DatasetMeta
+from motorneural.neural import NeuralData, PopulationSpikeTimes
+from motorneural.motor import KinData, basic_kinematics
 from scipy.io import loadmat
 import os
 import re
-from motorneural.motorneural.typechecking import Callable
+from motorneural.typechecking import Callable
 
 # -----------------------
 
@@ -84,7 +84,7 @@ def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float,
                kin_fnc: Callable[None, KinData] = None, max_trials: int = None) -> HatsoData:
 
     if kin_fnc is None:
-        kin_fnc = calc_kinematics
+        kin_fnc = basic_kinematics
 
     assert np.abs(lag) <= 1, f"Extreme lag value: {lag}. Make sure its in seconds."
     assert 0 < bin_sz <= 1, f"Extreme bin size value: {bin_sz}. Make sure its in seconds."
@@ -168,7 +168,7 @@ def _load_data(data_dir: str, dataset: str, lag: float, bin_sz: float,
         # add kinematic data:
         ifm, ito = np.searchsorted(t, [st + lag, end + lag])
         ifm, ito = max(0, ifm - 1), min(len(t), ito + 1)
-        tr.kin = calc_kinematics(X[ifm: ito], t[ifm: ito], dst_t=tr.neural.t + lag, dx=.5)
+        tr.kin = kin_fnc(X[ifm: ito], t[ifm: ito], dst_t=tr.neural.t + lag, dx=.5)
 
         # add events and properties:
         tr_event_tms["max_spd"] = tr.kin.t[np.argmax(tr.kin["spd2"])]

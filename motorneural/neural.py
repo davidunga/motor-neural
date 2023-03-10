@@ -2,8 +2,8 @@
 Handles processing and storing neural information
 """
 
-from motorneural.motorneural.typechecking import *
-from motorneural.motorneural.uniformly_sampled import UniformlySampled, make_time_bins
+from motorneural.typechecking import *
+from motorneural.uniformly_sampled import UniformlySampled, make_time_bins
 import numpy as np
 
 

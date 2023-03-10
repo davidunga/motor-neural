@@ -1,7 +1,7 @@
 
-from motorneural.motorneural.typechecking import *
-from motorneural.motorneural.neural import NeuralData
-from motorneural.motorneural.motor import KinData
+from motorneural.typechecking import *
+from motorneural.neural import NeuralData
+from motorneural.motor import KinData
 from dataclasses import dataclass, field
 import numpy as np
 
